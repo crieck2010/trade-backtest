@@ -131,6 +131,49 @@ Semantic versioning with a changelog. See [CHANGELOG.md](CHANGELOG.md).
 
 This repo follows the trade-suite standard: license-key hook stub, update-check hook, and a merchant-of-record (Gumroad/Lemon Squeezy) pattern live in the `trade-suite` meta-repo -- never custom billing code inside engines.
 
+## The maths
+
+**What you learn.** What a strategy *would have done* on your bars — fill
+prices, costs, equity path, and a full metric panel — computed by an
+event-driven loop that cannot peek at the future.
+
+**Why it matters.** Backtests lie most often through lookahead bias and
+ignored costs. This engine's maths is built to make both structurally hard:
+signals from bar *t* can only fill at bar *t+1*'s open, and every fill pays
+adverse slippage plus commission before it touches the equity curve.
+
+**The maths.**
+
+- *Event loop*: per timestamp — fill pending orders at the bar's open →
+  mark to market → `strategy.on_bar(t)` → convert signals to orders held
+  for bar *t+1* → record the equity point. Signals express *targets* (LONG /
+  SHORT / EXIT); the portfolio orders only the delta from the current
+  position, and FIFO accounting splits closing commissions across legs.
+- *Costs*: slippage in basis points applied adversely (buys lift, sells
+  hit); commission models are Flat / PerShare / Percent.
+- *Sharpe*: annualized on simple returns — `mean(excess) / pstdev(excess) × √252`,
+  with the risk-free rate converted per-period as `(1 + rf)^(1/252) − 1`; 0
+  when volatility is zero.
+- *Sortino*: same numerator, but the denominator is downside deviation
+  `√(mean(min(0, r)²))` — upside volatility is not punished.
+- *Max drawdown*: the worst peak-to-trough loss as a positive fraction,
+  plus its duration in bars; *CAGR* from first to last equity;
+  *Calmar* = CAGR / max drawdown; *profit factor* = gross wins / gross
+  losses; *expectancy* = mean trade P&L.
+- *Sizing*: `FixedQuantitySizer` scales a fixed unit count by signal
+  `strength` (0–1 conviction); `PercentEquitySizer` targets a fraction of
+  equity with an optional leverage cap.
+
+**Honest limitations.**
+
+- No margin model: shorts are allowed and cash may go negative; margin
+  calls and borrow costs belong in trade-risk.
+- No partial fills and no market impact beyond slippage bps — large orders
+  look cheaper here than they are.
+- `periods_per_year=252` assumes daily bars; set it explicitly (e.g. 8,760
+  for hourly crypto) or every annualized number is wrong.
+- Single-threaded event loop — parallelize across backtests, not within one.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
