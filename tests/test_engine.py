@@ -73,6 +73,8 @@ def run_engine(**kwargs):
         strategy=LongOnlyCrossover(),
         portfolio=Portfolio(100_000.0, FixedQuantitySizer(10)),
         execution=execution,
+        adjustment_basis="none",  # synthetic bars carry no corporate actions
+        adjustment_note="hand-computed 10-bar scenario on synthetic bars",
     )
     return engine.run()
 

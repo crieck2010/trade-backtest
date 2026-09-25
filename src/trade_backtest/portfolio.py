@@ -5,14 +5,19 @@ The portfolio is the only component that touches money. Flow:
 * :meth:`Portfolio.on_signal` turns a strategy :class:`Signal` into an
   :class:`Order` (or ``None``) via the position sizer. Signals express
   *targets* (long / short / flat); the portfolio orders only the delta
-  from the current position, so reversals work naturally.
-* :meth:`Portfolio.on_fill` applies a :class:`Fill`: cash moves, FIFO
-  lots match, closed round-trips append to :attr:`trades`.
-* :meth:`Portfolio.mark_to_market` revalues positions; :meth:`record`
-  snapshots the equity curve.
+  from the current position, so reversals work naturally. Each order is
+  marked ``is_entry`` so execution can pick the right slippage knob.
+* :meth:`Portfolio.on_fill` applies a :class:`Fill`: cash moves (fill
+  price, commission, and the fill's half-spread cost), FIFO lots match,
+  closed round-trips append to :attr:`trades`.
+* :meth:`Portfolio.mark_to_market` revalues positions;
+  :meth:`Portfolio.accrue_borrow_cost` debits borrow on short market
+  value (actual/365); :meth:`record` snapshots the equity curve.
+* :meth:`Portfolio.apply_corporate_action` handles splits (lot rescale)
+  and dividends (cash credit/debit, or reinvestment).
 
-Short selling is permitted; margin and borrow costs are *not* modeled
-here -- that belongs to ``trade-risk``. Cash may go negative.
+Short selling is permitted; margin calls are *not* modeled here -- that
+belongs to ``trade-risk``. Cash may go negative.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from math import isfinite
 
+from .costs import CostModel
 from .exceptions import PortfolioError
 from .models import (
     Bar,
@@ -34,6 +40,7 @@ from .models import (
     Trade,
     ensure_utc,
 )
+from .total_return import CorporateAction, Dividend, Split
 
 
 class PositionSizer(ABC):
@@ -86,15 +93,31 @@ class PercentEquitySizer(PositionSizer):
 
 
 class Portfolio:
-    """Cash + positions + FIFO trade reconstruction."""
+    """Cash + positions + FIFO trade reconstruction.
 
-    def __init__(self, initial_cash: float, sizer: PositionSizer) -> None:
+    :param cost_model: the cost assumptions; ``None`` selects
+        ``CostModel.defaults()`` (costs are default-on).
+    :param dividend_reinvestment: when True, dividend payouts on long
+        positions buy new shares at the ex-date close, commission-free.
+    """
+
+    def __init__(
+        self,
+        initial_cash: float,
+        sizer: PositionSizer,
+        *,
+        cost_model: CostModel | None = None,
+        dividend_reinvestment: bool = True,
+    ) -> None:
         if not isfinite(initial_cash) or initial_cash < 0:
             raise ValueError(f"initial_cash must be non-negative, got {initial_cash!r}")
         self.initial_cash = float(initial_cash)
         self.sizer = sizer
+        self.cost_model = cost_model if cost_model is not None else CostModel.defaults()
+        self.dividend_reinvestment = bool(dividend_reinvestment)
         self.cash = float(initial_cash)
         self.equity = float(initial_cash)
+        self.total_borrow_cost = 0.0
         self._lots: dict[str, list[list]] = {}  # symbol -> [[signed_qty, price, timestamp]]
         self._prices: dict[str, float] = {}
         self.trades: list[Trade] = []
@@ -113,7 +136,8 @@ class Portfolio:
         if bar is None:
             raise PortfolioError(f"no bar for signal symbol {signal.symbol}")
         target = self.sizer.size(signal, bar.close, self)
-        delta = target - self.position(signal.symbol)
+        position = self.position(signal.symbol)
+        delta = target - position
         if abs(delta) < 1e-12:
             return None
         return Order(
@@ -123,13 +147,16 @@ class Portfolio:
             quantity=abs(delta),
             order_type=OrderType.LIMIT if signal.limit_price else OrderType.MARKET,
             limit_price=signal.limit_price,
+            is_entry=_classify_is_entry(position, target),
         )
 
     # -- fills -> cash/lots/trades ----------------------------------------------
     def on_fill(self, fill: Fill) -> None:
         symbol = fill.symbol
         signed = fill.signed_quantity
-        self.cash -= signed * fill.price + fill.commission
+        # Fill price already includes slippage; commission and the
+        # half-spread cost are charged to cash separately.
+        self.cash -= signed * fill.price + fill.commission + fill.spread_cost
         lots = self._lots.setdefault(symbol, [])
         remaining = signed
         # Match against opposite-sign lots, FIFO; commission is split
@@ -173,6 +200,101 @@ class Portfolio:
                 total += qty * price
         self.equity = total
 
+    def accrue_borrow_cost(
+        self, timestamp: datetime, prev_timestamp: datetime | None
+    ) -> float:
+        """Accrue borrow cost on short market value since ``prev_timestamp``.
+
+        ``short_mv * annual_bps / 10000 * days / 365`` (actual/365 day
+        count), debited from cash and accumulated in
+        :attr:`total_borrow_cost`. Skipped when there is no previous
+        timestamp, no elapsed time, no short exposure, or the cost model
+        is disabled / carries a zero borrow rate. Returns the amount.
+        """
+        if prev_timestamp is None:
+            return 0.0
+        days = (timestamp - prev_timestamp).total_seconds() / 86400.0
+        if days <= 0:
+            return 0.0
+        model = self.cost_model
+        if model.is_disabled or model.borrow_cost_annual_bps == 0:
+            return 0.0
+        short_mv = 0.0
+        for symbol, lots in self._lots.items():
+            qty = sum(q for q, _, _ in lots)
+            if qty < 0:
+                price = self._prices.get(symbol)
+                if price is None:
+                    raise PortfolioError(f"no price to value {symbol}")
+                short_mv += -qty * price
+        if short_mv <= 0:
+            return 0.0
+        cost = short_mv * model.borrow_cost_annual_bps / 10_000.0 * days / 365.0
+        self.cash -= cost
+        self.total_borrow_cost += cost
+        return cost
+
+    # -- corporate actions --------------------------------------------------------
+    def apply_corporate_action(self, action: CorporateAction, bar: Bar | None = None) -> str:
+        """Apply one corporate action; returns a human-readable description.
+
+        * ``Split``: every open lot becomes ``qty * ratio`` shares at
+          ``price / ratio`` -- position value is unchanged and FIFO P&L
+          across the split is unaffected.
+        * ``Dividend``: long holders receive ``qty * amount_per_share``
+          -- reinvested into new shares at the ex-date close
+          (commission-free) when ``dividend_reinvestment`` is on, else
+          credited to cash. Short holders *pay* the dividend: cash is
+          debited. No position: no-op.
+
+        ``bar`` supplies the ex-date close for reinvestment; when it is
+        missing (no bar on the ex-date) a dividend falls back to cash
+        credit/debit, documented in the returned description.
+        """
+        symbol = action.symbol
+        if isinstance(action, Split):
+            lots = self._lots.get(symbol, [])
+            for lot in lots:
+                lot[0] *= action.ratio
+                lot[1] /= action.ratio
+            if symbol in self._prices:
+                self._prices[symbol] /= action.ratio
+            return (
+                f"{action.ratio:g}-for-1 split on {symbol} ex {action.ex_date}: "
+                f"{len(lots)} open lot(s) rescaled"
+            )
+        if isinstance(action, Dividend):
+            qty = self.position(symbol)
+            if qty == 0:
+                return (
+                    f"dividend ${action.amount_per_share:g}/sh on {symbol} "
+                    f"ex {action.ex_date}: no position, no-op"
+                )
+            payout = abs(qty) * action.amount_per_share
+            if qty > 0:
+                if self.dividend_reinvestment and bar is not None and bar.close > 0:
+                    new_shares = payout / bar.close
+                    self._lots.setdefault(symbol, []).append(
+                        [new_shares, bar.close, bar.timestamp]
+                    )
+                    return (
+                        f"dividend ${action.amount_per_share:g}/sh on {symbol} "
+                        f"ex {action.ex_date}: ${payout:,.2f} reinvested at "
+                        f"${bar.close:,.2f} -> +{new_shares:.4f} sh"
+                    )
+                self.cash += payout
+                fallback = " (no bar on ex-date; reinvestment impossible)" if bar is None else ""
+                return (
+                    f"dividend ${action.amount_per_share:g}/sh on {symbol} "
+                    f"ex {action.ex_date}: ${payout:,.2f} credited to cash{fallback}"
+                )
+            self.cash -= payout
+            return (
+                f"dividend ${action.amount_per_share:g}/sh on {symbol} "
+                f"ex {action.ex_date}: short pays ${payout:,.2f}"
+            )
+        raise PortfolioError(f"unknown corporate action: {type(action).__name__}")
+
     def record(self, timestamp: datetime) -> None:
         self.equity_curve.append(
             EquityPoint(timestamp=ensure_utc(timestamp), equity=self.equity, cash=self.cash)
@@ -181,3 +303,27 @@ class Portfolio:
 
 def _sign(value: float) -> int:
     return 1 if value > 0 else -1
+
+
+def _classify_is_entry(position: float, target: float) -> bool:
+    """Decide whether an order opens/increases (entry) or closes/reduces
+    (exit) the absolute position.
+
+    * flat -> opening: entry;
+    * target flat -> exit;
+    * same direction: bigger absolute target is an entry, smaller an exit;
+    * reversal (direction flips): the *dominant* leg decides -- if the
+      new opening leg is at least as large as the closing leg it is an
+      entry, else an exit. Ties classify as entry. This is a documented
+      approximation: a reversal really pays the exit knob on the closing
+      leg and the entry knob on the opening leg.
+    """
+    if position == 0:
+        return True
+    if target == 0:
+        return False
+    if _sign(target) == _sign(position):
+        return abs(target) > abs(position)
+    closing_leg = abs(position)
+    opening_leg = abs(target)
+    return opening_leg >= closing_leg

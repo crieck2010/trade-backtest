@@ -83,6 +83,11 @@ def main() -> None:
         execution=SimulatedExecutionHandler(
             slippage_bps=1.0, commission=NoCommission()
         ),
+        # Synthetic demo bars: no corporate actions exist to adjust for.
+        # (Explicit old-style costs above select the legacy zero-spread path;
+        # a bare SimulatedExecutionHandler() would apply CostModel.defaults().)
+        adjustment_basis="none",
+        adjustment_note="synthetic demo bars carry no corporate actions",
     )
     result = engine.run()
     print(f"Symbols:      {result.symbols}")
@@ -94,6 +99,8 @@ def main() -> None:
             print(f"{name:28s} {value:.0f}")
         else:
             print(f"{name:28s} {value:+.4f}")
+    print(f"Basis:        {result.assumptions['adjustment_basis']}")
+    print(f"Costs:        {result.assumptions['cost_model']['commission']}")
 
 
 if __name__ == "__main__":

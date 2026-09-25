@@ -8,6 +8,7 @@ accounting, and reports headline performance metrics.
 """
 
 from .data import BarDataHandler, ListDataHandler, normalize_bar
+from .costs import CostModel
 from .engine import BacktestEngine, BacktestResult
 from .exceptions import BacktestError, DataError, ExecutionError, PortfolioError
 from .execution import (
@@ -44,17 +45,31 @@ from .performance import (
 )
 from .portfolio import FixedQuantitySizer, PercentEquitySizer, Portfolio, PositionSizer
 from .strategy import Strategy
+from .total_return import (
+    AdjustedDataHandler,
+    AdjustmentBasis,
+    CorporateAction,
+    Dividend,
+    Split,
+    buy_and_hold_curve,
+    excess_vs_benchmark,
+)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
+    "AdjustedDataHandler",
+    "AdjustmentBasis",
     "BacktestEngine",
     "BacktestError",
     "BacktestResult",
     "Bar",
     "BarDataHandler",
     "Commission",
+    "CorporateAction",
+    "CostModel",
     "DataError",
+    "Dividend",
     "EquityPoint",
     "ExecutionError",
     "Fill",
@@ -74,11 +89,14 @@ __all__ = [
     "Signal",
     "SignalAction",
     "SimulatedExecutionHandler",
+    "Split",
     "Strategy",
     "Trade",
     "annualized_volatility",
+    "buy_and_hold_curve",
     "cagr",
     "calmar_ratio",
+    "excess_vs_benchmark",
     "expectancy",
     "max_drawdown",
     "normalize_bar",

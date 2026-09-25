@@ -58,7 +58,8 @@ def test_negative_commission_rejected():
 
 
 def test_market_buy_fills_at_open():
-    ex = SimulatedExecutionHandler()
+    # Explicit legacy zeros: a bare handler is default-on since v0.2.0.
+    ex = SimulatedExecutionHandler(slippage_bps=0.0, commission=NoCommission())
     fills = ex.fill([market_buy()], {"TEST": bar(open=100.0)})
     assert len(fills) == 1
     assert fills[0].price == 100.0
@@ -81,7 +82,7 @@ def test_commission_attached_to_fill():
 
 
 def test_limit_buy_fills_when_touched():
-    ex = SimulatedExecutionHandler()
+    ex = SimulatedExecutionHandler(slippage_bps=0.0, commission=NoCommission())
     order = Order(symbol="TEST", timestamp=T0, action=OrderAction.BUY, quantity=10,
                   order_type=OrderType.LIMIT, limit_price=99.0)
     fills = ex.fill([order], {"TEST": bar(open=100.0, low=98.0)})
@@ -97,7 +98,7 @@ def test_limit_buy_skipped_when_not_touched():
 
 
 def test_limit_sell_fills_when_touched():
-    ex = SimulatedExecutionHandler()
+    ex = SimulatedExecutionHandler(slippage_bps=0.0, commission=NoCommission())
     order = Order(symbol="TEST", timestamp=T0, action=OrderAction.SELL, quantity=10,
                   order_type=OrderType.LIMIT, limit_price=101.0)
     fills = ex.fill([order], {"TEST": bar(open=100.0, high=102.0)})
