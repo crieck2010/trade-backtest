@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-27
+
+### Added
+- `adversarial` module: the named adversarial hidden-data-validation suite.
+  Four poison injectors plant four leakage classes into synthetic sandbox
+  price feeds -- `inject_future_return_leakage` (feature column computed
+  from future bars), `inject_timestamp_shift` (feature payload shifted early
+  relative to the price columns, the observable form of a row/timestamp
+  misalignment), `inject_ffill_gap` (gap forward-filled with the post-gap
+  close, a fill value knowable only with lookahead), and
+  `inject_unadjusted_corporate_action` (undeclared split/dividend jump
+  presented as a genuine price move).
+- Four named guards that flag each class through the REAL pipeline (real
+  `Bar`s, real `ListDataHandler`, real `BacktestEngine`, real
+  `AdjustedDataHandler` -- nothing mocked): `guard_future_return_leakage`
+  (feature vs forward-return correlation against a `z/sqrt(n)` band),
+  `guard_timestamp_alignment` (carried-vs-recomputed cross-correlation peak
+  at the shift lag), `guard_ffill_gap` (flat runs whose value equals the
+  first genuine post-run close), `guard_corporate_actions` (split-ratio and
+  ex-date-drop signatures on the adjusted stream, cross-checked against
+  declared actions).
+- `run_adversarial_suite()` (public function) plus a CLI:
+  `python -m trade_backtest.adversarial` and the `trade-backtest-adversarial`
+  console script (`--list`, `--case NAME`, `--seed`, `--json`, `--quiet`).
+  Each injector->guard pair is individually addressable via `CASES` /
+  `run_case(name)`; a failure raises `AdversarialFailure` naming the exact
+  leakage class. A clean feed must pass with zero flags (clean control).
+  Materiality witness: the planted leaky feature traded through the real
+  engine prints Sharpe ~4.7 on pure noise.
+- `docs/adversarial.md`: detection statistics ("the maths") -- the
+  correlation flag band, the lag-of-peak shift signature, the measure-zero
+  flat-run argument, and the split-ratio test, including what shift
+  magnitude / correlation each detector flags and why.
+- 41 new tests (`tests/test_adversarial.py`); 131 total, all green.
+
+### Grandfathering
+- Purely additive: no existing guard, threshold, or engine behavior changed;
+  no prior validation round is retroactively invalidated. Declaring a real
+  `Split`/`Dividend` on the event date clears the corporate-action flag via
+  the existing `AdjustedDataHandler` machinery.
+
 ## [0.2.0] - 2026-09-24
 
 ### The audit that motivated it

@@ -33,6 +33,7 @@ bars(t) --> [fill pending orders at bar(t) open]
 | `total_return` | `AdjustmentBasis`, `CorporateAction`/`Dividend`/`Split`, `AdjustedDataHandler`, `buy_and_hold_curve`, `excess_vs_benchmark` |
 | `performance` | Pure metric functions + `summarize()` |
 | `engine` | `BacktestEngine` event loop, `BacktestResult` (+ required `assumptions`) |
+| `adversarial` | Named adversarial hidden-data-validation suite: poison injectors + named no-future-leakage guards, `run_adversarial_suite()`, CLI |
 
 ### Interoperability
 
@@ -172,7 +173,25 @@ pip install -e .
 pytest
 ```
 
-90 tests, including a hand-computed 10-bar integration scenario that pins fill prices to the bar *after* each signal, hand-computed dividend/split/borrow scenarios, and the full cost-model matrix (default-on, opt-out, legacy).
+131 tests, including a hand-computed 10-bar integration scenario that pins fill prices to the bar *after* each signal, hand-computed dividend/split/borrow scenarios, the full cost-model matrix (default-on, opt-out, legacy), and the 41-test adversarial hidden-data-validation suite.
+
+```bash
+python -m trade_backtest.adversarial   # the named no-future-leakage suite
+```
+
+## Adversarial hidden-data validation
+
+The engine is lookahead-free *by construction*, but construction is a
+promise, not a proof. `trade_backtest.adversarial` is the proof: four poison
+injectors plant four leakage classes into synthetic sandbox feeds --
+future-return leakage in a feature column, timestamp/feature misalignment,
+future-smuggling gap fills, and unadjusted corporate-action jumps -- and
+four named guards must flag each one through the real pipeline (real `Bar`s,
+real `BacktestEngine`, real `AdjustedDataHandler`; nothing mocked). A clean
+feed must pass with zero flags. Each injector->guard pair is individually
+addressable (`run_case("ffill_gap")`, `--case ffill_gap`), and a failure
+names the exact leakage class. Detection statistics and the maths behind
+each flag band live in [docs/adversarial.md](docs/adversarial.md).
 
 ## Versioning
 

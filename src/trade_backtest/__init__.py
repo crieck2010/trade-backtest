@@ -9,6 +9,23 @@ accounting, and reports headline performance metrics.
 
 from .data import BarDataHandler, ListDataHandler, normalize_bar
 from .costs import CostModel
+from . import adversarial
+from .adversarial import (
+    AdversarialFailure,
+    CASES,
+    guard_corporate_actions,
+    guard_ffill_gap,
+    guard_future_return_leakage,
+    guard_timestamp_alignment,
+    inject_ffill_gap,
+    inject_future_return_leakage,
+    inject_timestamp_shift,
+    inject_unadjusted_corporate_action,
+    make_clean_feed,
+    run_adversarial_suite,
+    run_case,
+    run_guards,
+)
 from .engine import BacktestEngine, BacktestResult
 from .exceptions import BacktestError, DataError, ExecutionError, PortfolioError
 from .execution import (
@@ -55,16 +72,18 @@ from .total_return import (
     excess_vs_benchmark,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "AdjustedDataHandler",
     "AdjustmentBasis",
+    "AdversarialFailure",
     "BacktestEngine",
     "BacktestError",
     "BacktestResult",
     "Bar",
     "BarDataHandler",
+    "CASES",
     "Commission",
     "CorporateAction",
     "CostModel",
@@ -92,15 +111,28 @@ __all__ = [
     "Split",
     "Strategy",
     "Trade",
+    "adversarial",
     "annualized_volatility",
     "buy_and_hold_curve",
     "cagr",
     "calmar_ratio",
     "excess_vs_benchmark",
     "expectancy",
+    "guard_corporate_actions",
+    "guard_ffill_gap",
+    "guard_future_return_leakage",
+    "guard_timestamp_alignment",
+    "inject_ffill_gap",
+    "inject_future_return_leakage",
+    "inject_timestamp_shift",
+    "inject_unadjusted_corporate_action",
+    "make_clean_feed",
     "max_drawdown",
     "normalize_bar",
     "profit_factor",
+    "run_adversarial_suite",
+    "run_case",
+    "run_guards",
     "sharpe_ratio",
     "sortino_ratio",
     "summarize",
