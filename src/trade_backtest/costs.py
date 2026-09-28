@@ -126,10 +126,19 @@ def fill_cost(price: float, quantity: float, is_entry: bool, model: CostModel) -
     ``price`` is the raw (pre-slippage) fill price; slippage and spread
     are quoted against it so hand-checks stay exact. Returns
     ``{"commission", "slippage", "spread", "total"}`` in dollars.
+
+    The maths on sign: slippage and spread are costs proportional to
+    *notional exposure*, ``|price| * quantity``, never to signed price.
+    Quoting against signed price flips the sign of the cost when the
+    print is negative (WTI, 2020-04-20: -$37.63) -- a sign error in the
+    model, not corrupt data. ``abs()`` keeps every leg non-negative for
+    negative, zero, and positive prints alike; at price 0 the notional
+    is 0 and the legs are 0, which is exact, not a special case.
     """
+    ref = abs(price)
     bps = model.slippage_entry_bps if is_entry else model.slippage_exit_bps
-    slippage = price * quantity * bps / 10_000.0
-    spread = price * quantity * model.half_spread_bps / 10_000.0
+    slippage = ref * quantity * bps / 10_000.0
+    spread = ref * quantity * model.half_spread_bps / 10_000.0
     commission = model.commission.cost(quantity, price)
     return {
         "commission": commission,

@@ -72,7 +72,7 @@ from .total_return import (
     excess_vs_benchmark,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "AdjustedDataHandler",

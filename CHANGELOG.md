@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-28
+
+### Fixed
+- Negative prints no longer crash the cost path (the round-3
+  `CL=F macd_trend` bug: WTI -$37.63 on 2020-04-20 raised
+  `ValueError: slippage must be non-negative`). Slippage, half-spread,
+  and percent commission are now quoted against notional
+  `|price| * quantity` instead of signed price, and the adverse fill
+  move is by action sign (BUY pays more, SELL receives less) whatever
+  the print's sign. At price 0 all legs are exactly 0. `Fill`
+  validation still rejects negative cost legs -- the guard stands, the
+  computation is now correct. No future-looking reference is
+  introduced, so the adversarial suite's lookahead guards are
+  unaffected. See `docs/COSTS_AND_TOTAL_RETURN.md` ("Negative prints")
+  for the maths.
+- 12 new regression tests (`tests/test_negative_prices.py`): April-2020-
+  shaped series (positive -> negative -> positive) through the real
+  engine -- no crash, adverse fill direction on both sides of a
+  negative print, sane trade accounting, non-negative cost legs on
+  every fill. 143 total, all green.
+
 ## [0.3.0] - 2026-09-27
 
 ### Added

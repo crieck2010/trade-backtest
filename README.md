@@ -121,6 +121,12 @@ double-count.
   passed), so callers with their own post-hoc cost models stay exact.
 - **Not modeled**: market impact (a hook, `None` = stated as not
   modeled), partial fills, latency, margin calls.
+- **Negative prints**: slippage, spread, and percent commission are
+  quoted against notional `|price| * quantity` (never signed price), so
+  negative prints (WTI -$37.63, 2020-04-20) slip adversely and never
+  crash `Fill` validation. BUY pays more / SELL receives less by action
+  sign; at price 0 all legs are exactly 0. See
+  `docs/COSTS_AND_TOTAL_RETURN.md` ("Negative prints") for the maths.
 
 ## Assumptions
 

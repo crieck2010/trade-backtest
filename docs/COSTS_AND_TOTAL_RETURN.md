@@ -122,3 +122,45 @@ terms. Dividend handling through the engine is exact; split handling is
 exact at the portfolio level. If you run splits through the full engine
 loop, verify the equity path against the unadjusted economics before
 trusting it -- this is the one v0.2.0 seam still under scrutiny.
+
+## Negative prints: the sign rule for costs (v0.3.1)
+
+WTI front-month printed **-$37.63 on 2020-04-20**. Negative prices are
+real market data, not corrupt input. Before v0.3.1 the engine crashed on
+them: slippage was computed as `price * quantity * bps`, which flips
+sign with the print, and `Fill` validation (correctly) rejected the
+negative dollar cost. That rejection was the guard working; the
+computation feeding it was wrong.
+
+**The maths.** Slippage, spread, and percent commission are costs on
+*notional exposure*, and notional is unsigned:
+
+```
+slippage_$ = |price| * quantity * bps / 10_000        (>= 0 always)
+spread_$   = |price| * quantity * half_spread_bps / 10_000
+commission = rate * quantity * |price|                 (percent schedules)
+```
+
+The adverse fill-price move is a function of *action*, not price sign:
+a BUY pays more (price moves up), a SELL receives less (price moves
+down), whatever the print's sign:
+
+```
+BUY:  fill = raw + |raw| * bps / 10_000
+SELL: fill = raw - |raw| * bps / 10_000
+```
+
+At `raw = -$37.63`, 5 bps: BUY fills at -$37.6112 (pays $0.0188 more
+per unit -- adverse, correct), SELL fills at -$37.6488 (receives
+$0.0188 less -- adverse, correct). At `raw = 0` the notional is 0, so
+all legs are exactly 0: no crash, no special case, no distortion.
+Positive-print behavior is bit-identical to before.
+
+**What the fix does not do.** It does not weaken validation: `Fill`
+still rejects negative cost legs, so any future sign error fails loud.
+It introduces no future-looking reference price (the reference is the
+fill bar's own `|raw|`), so the v0.3.0 adversarial suite's lookahead
+guards are unaffected -- the full suite, adversarial included, stays
+green. Cash accounting needs no change: buying at a negative fill
+price *credits* cash, which is exactly the economics of being paid to
+take oil.

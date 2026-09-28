@@ -89,7 +89,9 @@ class PercentCommission(Commission):
         self.rate = float(rate)
 
     def cost(self, quantity: float, price: float) -> float:
-        return self.rate * quantity * price
+        # Notional is |price| * quantity: a negative print must not make
+        # the commission negative (or zero) -- same sign rule as slippage.
+        return self.rate * quantity * abs(price)
 
 
 class NoCommission(Commission):
@@ -235,6 +237,11 @@ class SimulatedExecutionHandler:
             if order.is_entry
             else self.cost_model.slippage_exit_bps
         )
-        slip = raw * bps / 10_000.0
+        # Adverse means "worse for the trader": a BUY pays *more* (price
+        # moves up), a SELL receives *less* (price moves down) -- whatever
+        # the sign of the print. The move is quoted against |raw| so a
+        # negative print (e.g. WTI -$37.63) still slips adversely instead
+        # of flipping favorable or crashing downstream validation.
+        slip = abs(raw) * bps / 10_000.0
         price = raw + slip if order.action is OrderAction.BUY else raw - slip
         return raw, price

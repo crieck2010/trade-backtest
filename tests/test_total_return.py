@@ -306,7 +306,7 @@ def test_assumptions_block_has_all_required_keys():
                 "corporate_actions_applied", "dividend_reinvestment",
                 "cost_model", "borrow", "not_modeled", "periods_per_year"):
         assert key in a, f"missing assumptions key: {key}"
-    assert a["engine_version"] == "0.3.0"
+    assert a["engine_version"] == "0.3.1"
     assert a["adjustment_basis"] == "unadjusted_with_events"
     assert a["corporate_actions_applied"] == {"dividends": 1, "splits": 0}
     assert a["dividend_reinvestment"] is True
